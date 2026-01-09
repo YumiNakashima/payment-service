@@ -1,14 +1,17 @@
 spring:
   application:
     name: payment-service
+  config:
+    import: "aws-parameterstore:/payment-service/"
   data:
     mongodb:
-      uri: mongodb://localhost:27017/db_pagamentos # Ajuste conforme seu ambiente
+      uri: ${mongodb-uri}
 mercadopago:
-  token: APP_USR-3130684598119223-010519-2b93b0f96adcbbc4309e0d1cb06549c0-3113708013
-  notification-url: https://seusite.com/api/pagamentos/webhook # URL pública (use ngrok para testar local)
+  token: ${mp-token}
+  notification-url: ${mp-notification-url}
+  user-id: ${mp-user-id}
 cloud:
   aws:
-    sqs:
-      queue:
-        url: ${SQS_QUEUE_URL} # URL gerada pelo Terraform
+    sns:
+      topic:
+        arn: ${sns-topic-arn}

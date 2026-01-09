@@ -1,12 +1,12 @@
-package br.com.fiap.techchallenge.paymentservice.service
+package br.com.fiap.techchallenge.paymentservice.client
 
 import br.com.fiap.techchallenge.paymentservice.dto.MercadoPagoOrderConfig
+import br.com.fiap.techchallenge.paymentservice.dto.MercadoPagoOrderData
 import br.com.fiap.techchallenge.paymentservice.dto.MercadoPagoOrderItem
 import br.com.fiap.techchallenge.paymentservice.dto.MercadoPagoOrderPayment
 import br.com.fiap.techchallenge.paymentservice.dto.MercadoPagoOrderRequest
 import br.com.fiap.techchallenge.paymentservice.dto.MercadoPagoOrderResponse
 import br.com.fiap.techchallenge.paymentservice.dto.MercadoPagoOrderTransactions
-import br.com.fiap.techchallenge.paymentservice.dto.MercadoPagoPaymentResponse
 import br.com.fiap.techchallenge.paymentservice.dto.MercadoPagoQrConfig
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
@@ -20,9 +20,7 @@ private val logger = KotlinLogging.logger {}
 
 @Component
 class MercadoPagoClient(
-    @Value("\${mercadopago.token}") val token: String,
-    @Value("\${mercadopago.notification-url}") val notificationUrl: String,
-    @Value("\${mercadopago.user-id}") val userId: String,
+    @Value("\${mercadopago.token}") val token: String
 ) {
 
     private val restClient = RestClient.builder()
@@ -32,17 +30,17 @@ class MercadoPagoClient(
 
     fun createQrCodeOrder(orderId: String, amount: BigDecimal): MercadoPagoOrderResponse? {
         val request = MercadoPagoOrderRequest(
-            totalAmount = amount,
+            totalAmount = amount.toString(),
             description = "Order $orderId",
             externalReference = orderId,
             config = MercadoPagoOrderConfig(
-                qr = MercadoPagoQrConfig(externalPosId = "SUC001POS001")
+                qr = MercadoPagoQrConfig(externalPosId = "LOJ001techchallengePOS001")
             ),
             transactions = MercadoPagoOrderTransactions(
-                payments = listOf(MercadoPagoOrderPayment(amount = amount))
+                payments = listOf(MercadoPagoOrderPayment(amount = amount.toString()))
             ),
             items = listOf(
-                MercadoPagoOrderItem(title = "Order item $orderId", unitPrice = amount)
+                MercadoPagoOrderItem(title = "Order item $orderId", unitPrice = amount.toString())
             )
         )
 
@@ -61,16 +59,15 @@ class MercadoPagoClient(
         }
     }
 
-    fun fetchPayment(id: String): MercadoPagoPaymentResponse? {
-        logger.info { "Fetch payment status for the id: $id" }
-
+    fun fetchOrder(id: String): MercadoPagoOrderData? {
+        logger.info { "Fetch order payment status for the id: $id" }
         return try {
             restClient.get()
-                .uri("/payments/{id}", id)
+                .uri("/orders/{id}", id)
                 .retrieve()
-                .body(MercadoPagoPaymentResponse::class.java)
+                .body(MercadoPagoOrderData::class.java)
         } catch (e: Exception) {
-            logger.error { "Error trying to fetch payment on MP: ${e.message}" }
+            logger.error(e) { "Error fetching Order V1 $id" }
             null
         }
     }

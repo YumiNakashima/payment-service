@@ -6,11 +6,11 @@ import java.math.BigDecimal
 import java.time.LocalDateTime
 
 @Document(collection = "payments")
-data class Payment(
+data class OrderPayment(
     @Id val id: String? = null,
     val orderId: String,
     val amount: BigDecimal,
-    var status: PaymentStatus = PaymentStatus.PENDING,
+    var status: String,
     val mercadoPagoId: String? = null,
     val qrCode: String? = null, // Dados retornados do MP
     val createdAt: LocalDateTime = LocalDateTime.now(),

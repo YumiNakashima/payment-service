@@ -1,49 +1,74 @@
 package br.com.fiap.techchallenge.paymentservice.service
 
-import br.com.fiap.techchallenge.paymentservice.domain.Payment
-import br.com.fiap.techchallenge.paymentservice.dto.MpPaymentRequest
-import br.com.fiap.techchallenge.paymentservice.dto.PaymentView
-import br.com.fiap.techchallenge.paymentservice.repository.PaymentRepository
-import org.springframework.beans.factory.annotation.Value
+import br.com.fiap.techchallenge.paymentservice.client.MercadoPagoClient
+import br.com.fiap.techchallenge.paymentservice.domain.OrderPayment
+import br.com.fiap.techchallenge.paymentservice.dto.MercadoPagoWebhookPayload
+import br.com.fiap.techchallenge.paymentservice.dto.OrderPaymentRequest
+import br.com.fiap.techchallenge.paymentservice.messaging.PaymentStatusPublisher
+import br.com.fiap.techchallenge.paymentservice.repository.OrderPaymentRepository
+import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.stereotype.Service
-import org.springframework.web.client.RestClient
-import java.math.BigDecimal
+import java.time.LocalDateTime
+
+private val logger = KotlinLogging.logger {}
 
 @Service
 class PaymentService(
-    private val repository: PaymentRepository,
-    @Value("\${mercadopago.token}") private val token: String,
-    @Value("\${mercadopago.notification-url}") private val notificationUrl: String
+    private val repository: OrderPaymentRepository,
+    private val mercadoPagoClient: MercadoPagoClient,
+    private val publisher: PaymentStatusPublisher
 ) {
 
-    private val restClient = RestClient.builder()
-        .baseUrl("https://api.mercadopago.com/v1")
-        .defaultHeader("Authorization", "Bearer $token")
-        .build()
+    fun createPayment(request: OrderPaymentRequest): OrderPayment {
+        logger.info { "Creating payment for order ${request.orderId}" }
 
-    fun initiatePaymentForOrder(orderId: String, value: BigDecimal): PaymentView {
-        // salva estado inicial
-        val payment = repository.save(Payment(orderId = orderId, value = value))
-
-        val request = MpPaymentRequest(
-            transaction_amount = value,
-            description = "Pedido $orderId",
-            // Email fake para teste mas mudar depois para o que vem da request
-            payer = MpPaymentRequest.MpPayer(email = "test_user_123@testuser.com"),
-            notification_url = notificationUrl
+        val pendingOrderPayment = OrderPayment(
+            orderId = request.orderId,
+            amount = request.amount,
+            status = "created",
+            createdAt = LocalDateTime.now(),
+            updatedAt = LocalDateTime.now()
         )
 
-        val response = restClient.post()
-            .uri("/payments")
-            .body(request)
-            .retrieve()
-            .toEntity(String::class.java)
-        // Dica: Crie DTOs para mapear a resposta e pegar o QR Code real
+        var payment = repository.save(pendingOrderPayment)
 
-        // Aqui você atualizaria o 'pagamento' com o QR Code retornado na 'response'
-        // payment.qrCode = response.body...
+        val mpResponse = mercadoPagoClient.createQrCodeOrder(request.orderId, request.amount)
+            ?: throw RuntimeException("Error generating QR payment")
 
-        val paymentResponse = repository.save(payment)
-        return PaymentView.fromDomain(paymentResponse)
+        logger.info { "MP Response: $mpResponse"}
+
+        payment = payment.copy(
+            mercadoPagoId = mpResponse.id.toString(),
+            qrCode = mpResponse.typeResponse?.qrData ?: "PIX-ESTATICO-DO-CAIXA-SUC001POS001",
+        )
+
+        return repository.save(payment)
     }
+
+
+    fun processWebhook(payload: MercadoPagoWebhookPayload) {
+        if (payload.type != "order") return
+
+        val infoMp = mercadoPagoClient.fetchOrder(payload.data?.id!!) ?: return
+
+        val orderPayment = repository.findByMercadoPagoId(payload.data.id)
+
+        if (orderPayment != null) {
+            if (orderPayment.status != infoMp.status) {
+                logger.info { "Found order status update for orderId: ${orderPayment.orderId} with mpId ${payload.data.id}" }
+
+                orderPayment.status = infoMp.status!!
+                orderPayment.updatedAt = LocalDateTime.now()
+                repository.save(orderPayment)
+
+
+                publisher.notifyOrder(orderPayment.orderId, infoMp.status!!)
+            } else {
+                logger.info {"No changes in order ${orderPayment.orderId}. Ignoring duplicate." }
+            }
+        } else {
+            logger.info { "Order ${payload.data.orderId} not found in local database." }
+        }
+    }
+
 }
